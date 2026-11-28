@@ -249,8 +249,8 @@ Secrets in two stages, as #234 specifies:
 
 A value change therefore takes effect on the next rollout, and nobody
 edits configuration on the volume by hand. Configuration that an
-import brings across is read once, its `[auth]` and `[saml]` sections
-are compared with the render and reported (section 1.7); the rendered
+import brings across is read once, its `gerrit.config` is compared
+with the render and reported (section 1.7); the rendered
 files replace it, with the one exception below.
 
 `gerrit.serverId` is not configuration but site identity. Gerrit
@@ -544,19 +544,29 @@ python3 K8S/charts/gerrit/files/scripts/verify-import.py \
     --password-file password
 ```
 
-**Authentication differences warn.** The chart's `gerrit.config`
-replaces the archive's, so a key the values miss or mistype in the
-sections that govern sign-in changes who can sign in and as whom
-without a word. When the archive is checked, `site-import` compares
-the unqualified `[auth]` and `[saml]` sections of the archive's
-`gerrit.config` with the rendered one and adds a warning to the
-migration report for each key that only one side sets or that both
-set to different values, with the values on each side. Names compare
-as git reads them, without regard to case; a repeated key compares as
-the list of its values; subsections are not compared. A key whose
-name ends in `password`, `secret` or `privateKey`, in any letter case,
-is named without its value, since the chart takes it from a Secret.
-`saml.keystorePath` is left out, as the keystore check covers it, and
+**Configuration differences warn.** The chart's `gerrit.config`
+replaces the archive's, so a key the values miss or mistype is lost
+without a word: in the sections that govern sign-in it changes who
+can sign in and as whom, and a site that loses
+`receive.enableSignedPush` loses signed push. When the archive is
+checked, `site-import` compares every key of the archive's
+`gerrit.config`, subsections included, with the rendered one and adds
+a warning to the migration report for each key that the archive sets
+and the render does not, or that both set to different values, with
+the values on each side, and for each unqualified `[auth]` and
+`[saml]` key that only the render sets. The other keys only the render
+sets, which come from the chart's values and defaults, share one line
+that names them without values, so they do not bury what an import
+loses. Section and key names compare as git reads them, without regard
+to case; subsection names keep their case, as git keeps it; a
+repeated key compares as the list of its values. A key whose name
+ends in `password`, `pass`, `secret`, `key`, `token` or `seed`, in any
+letter case and any section, is named without its value. Keys the
+chart sets from the container's layout differ on every import and are
+left out: `gerrit.basePath`, `gerrit.serverId`, which the identity
+check covers, `httpd.listenUrl`, `sshd.listenAddress`, every
+`container.*` key, `cache.directory`, `index.type` and
+`saml.keystorePath`, which the keystore check covers;
 `saml.metadataPath` is compared only between two `http://` or
 `https://` URLs, since a file path names a file on its own host.
 A URL in any value, relative and scheme-relative ones included, is
@@ -569,7 +579,10 @@ password ends the authority early, or one holding, once its URLs are
 hidden, a `:` before an `@` other than a URL's scheme, as
 `user:secret@` does, a `//` in the password included, a `%`, which
 may encode a URL, or a URL it cannot read; values still compare in
-full. Runtime
+full. A subsection's name, which may be a URL with its credentials, as
+an `[http "<url>"]` or `[url "<url>"]` section's can be, is printed
+under the same rules and compared in full. Control characters in a
+name or a value print escaped. Runtime
 overrides apply after the render and are not compared. The lines are logged with the
 rest of the report on the imported configuration and recorded in
 `warnings`; they never fail the import.
@@ -1194,9 +1207,10 @@ Decided:
 - **Configuration drift on import.** A different `gerrit.serverId`
   fails the import, as do the system repositories' names and, with
   SAML, a keystore other than the Secret's, since each changes the
-  site's identity. Differences in the `[auth]` and `[saml]` sections
-  of `gerrit.config` only warn, one migration report line per key
-  (section 1.7); other sections are not compared.
+  site's identity. Differences anywhere else in `gerrit.config` only
+  warn, one migration report line per key the import loses or
+  changes, and one naming the keys only the render sets
+  (section 1.7).
 
 [gc-listenurl]: https://gerrit-review.googlesource.com/Documentation/config-gerrit.html#httpd.listenUrl
 [gc-serverid]: https://gerrit-review.googlesource.com/Documentation/config-gerrit.html#gerrit.serverId

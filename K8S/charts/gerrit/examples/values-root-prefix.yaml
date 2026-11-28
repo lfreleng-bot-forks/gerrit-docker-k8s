@@ -48,7 +48,7 @@ change:
   allowBlame: true
 
 receive:
-  enableSignedPush: false
+  enableSignedPush: true
   maxObjectSizeLimit: 100m
   timeout: 4min
 

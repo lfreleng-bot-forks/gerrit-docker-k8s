@@ -136,6 +136,7 @@ def test_scripts_configmap_carries_the_importer(tmp_path: Path) -> None:
         "site-import.py",
         "site_import_archive.py",
         "site_import_common.py",
+        "site_import_config.py",
         "site_import_report.py",
         "site_import_s3.py",
         "site_import_unpack.py",

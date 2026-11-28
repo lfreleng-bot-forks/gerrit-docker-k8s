@@ -197,6 +197,18 @@ def run(command: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
         raise SiteImportError(f"required tool not found: {command[0]}") from exc
 
 
+def run_bytes(command: list[str], **kwargs: Any) -> subprocess.CompletedProcess[bytes]:
+    """Run a command and keep its output as bytes.
+
+    Text mode reads a carriage return as a newline, which would move a
+    record's delimiter in output such as ``git config -z``.
+    """
+    try:
+        return subprocess.run(command, check=False, **kwargs)
+    except FileNotFoundError as exc:
+        raise SiteImportError(f"required tool not found: {command[0]}") from exc
+
+
 def git(*args: str) -> subprocess.CompletedProcess[str]:
     return run(["git", "-c", "safe.directory=*", *args], capture_output=True)
 

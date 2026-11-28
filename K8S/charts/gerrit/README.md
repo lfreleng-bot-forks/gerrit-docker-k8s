@@ -706,10 +706,9 @@ With SAML enabled, `site-import` also refuses an export whose
 keystore differs from the Secret's, before the site changes; see
 [Importing a site that uses SAML](#importing-a-site-that-uses-saml).
 
-`site-import` then logs a migration report: each key of the
-unqualified `[auth]` and `[saml]` sections that the archive's
-`gerrit.config` and the chart's render set differently, as described
-below, a note for a source older than Gerrit 3.13, or one whose
+`site-import` then logs a migration report: each key that the
+archive's `gerrit.config` and the chart's render set differently, as
+described below, a note for a source older than Gerrit 3.13, or one whose
 `gerrit_version` the import does not recognise, that its accounts keep
 their HTTP passwords, which Gerrit 3.13 accepts while
 `auth.httpPasswordFallbackEnabled` is `true`, its default, until an
@@ -727,28 +726,43 @@ see [Events log](#events-log), and, when the imported
 `etc/lfs.config` uses an S3 backend, that the chart writes the lfs
 plugin's S3 keys, which no archive brings in, from
 `plugins.lfs.existingSecret`. Read it with `kubectl logs <fullname>-0 -c site-import`.
-The `[auth]` and `[saml]` differences, the removed `gerrit.config`
+The `gerrit.config` differences, the removed `gerrit.config`
 keys and the events-log store are logged as soon as the archive is
 checked, before `site-init` replaces the imported files, so a failed
 init or reindex still shows them.
 
 The chart's `gerrit.config` replaces the archive's, so a key left out
-of the values, or given another value, changes who can sign in and as
-whom: without `saml.memberOfAttr` group membership no longer follows
-the identity provider, and another `saml.serviceProviderEntityId`
-makes it refuse every login. The report names each key that only the
-archive sets, that only the render sets, or that both set to different
-values, with the values on each side. Key names compare without regard
-to case, as git reports them in lower case; a repeated key compares as
-the list of its values, and subsections such as `[auth "x"]` are not
-compared. A key whose name ends in `password`, `secret` or
-`privateKey`, in any letter case, is named without its value: the
-chart takes it from a Secret, and a source site may hold
-`saml.keystorePassword` in `gerrit.config` rather than
-`secure.config`. `saml.keystorePath` is left out, as the chart mounts its own
-keystore and compares it with the archive's, and so is
-`saml.metadataPath` unless both sides name an `http://` or `https://`
-URL. A URL in any value, relative and scheme-relative ones included,
+of the values, or given another value, is lost on import. In `[auth]`
+and `[saml]` it changes who can sign in and as whom: without
+`saml.memberOfAttr` group membership no longer follows the identity
+provider, and another `saml.serviceProviderEntityId` makes it refuse
+every login. Elsewhere it changes how the site behaves: a source site
+that sets `receive.enableSignedPush = true` must carry
+`receive.enableSignedPush: true` in its values, or signed push turns
+off, and its projects' `receive.requireSignedPush` and its users' GPG
+keys do nothing. The report covers every key of the file, subsections
+such as `[commentlink "x"]` and `[plugin "x"]` included. It leads with
+what an import loses: one line, with the values on each side, for
+each key that the archive sets and the render does not, or that both
+set to different values, and for each `[auth]` and `[saml]` key that
+only the render sets. The other keys only the render sets come from
+the chart's values and defaults, and one line names them all, without
+their values. Section and key names compare without regard to case,
+as git reports them in lower case; subsection names keep their case,
+as git keeps it, so `[plugin "X"]` and `[plugin "x"]` are different
+keys; a repeated key compares as the list of its values. A key whose
+name ends in `password`, `pass`, `secret`, `key`, `token` or `seed`,
+in any letter case and any section or subsection, is named without its
+value, as `sendemail.smtpPass`, `receive.certNonceSeed` and
+`auth.registerEmailPrivateKey` are: a source site may hold such a key
+in `gerrit.config` rather than `secure.config`. The keys the chart
+sets from the container's layout differ on every import and are left
+out: `gerrit.basePath`, `gerrit.serverId`, which the import compares
+and refuses on its own, `httpd.listenUrl`, `sshd.listenAddress`, every
+`container.*` key, `cache.directory`, `index.type`, and
+`saml.keystorePath`, as the chart mounts its own keystore and compares
+it with the archive's; so is `saml.metadataPath` unless both sides
+name an `http://` or `https://` URL. A URL in any value, relative and scheme-relative ones included,
 is shown with its user-info, its whole query and its fragment replaced
 by `(not shown)`, as any of them can carry a credential, and a value
 holding both a URL and whitespace is not shown at all, as the text
@@ -760,9 +774,16 @@ URLs are hidden, a `:` before an `@` other than a URL's scheme, as
 `user:secret@` does, a `//` in the password included, a `%`, which
 may encode a URL, or a URL it cannot read; the values still compare
 in full, and a line says when two differ only in a part it does not
-show. The comparison is with the rendered file: the
-[runtime overrides](#runtime-overrides) apply later and are not
-considered. These lines are warnings and never fail the import; settle
+show. A subsection's name is printed under the same rules, as it may
+be a URL with its credentials, as an `[http "<url>"]` or
+`[url "<url>"]` section's can be: its user-info shows as `(not shown)`,
+and a name the rules would not show at all is printed as `(not shown)`,
+while the comparison uses the names in full. A control character in a
+name or a value, a carriage return or an escape included, prints
+escaped, as `\u001b`, so a line cannot rewrite a terminal. The
+comparison is with
+the rendered file: the [runtime overrides](#runtime-overrides) apply
+later and are not considered. These lines are warnings and never fail the import; settle
 each difference in the values before the cut-over.
 
 ### Recovery

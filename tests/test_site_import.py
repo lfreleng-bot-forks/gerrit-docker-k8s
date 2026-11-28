@@ -1242,29 +1242,29 @@ def test_http_password_report_names_the_token_migration(
         assert HTTP_PASSWORD_NOTE in warnings[0]
 
 
-def auth_report(tmp_path: Path, archive: str, render: str) -> list[str]:
-    """The auth report on an archive's gerrit.config against a render."""
+def config_report(tmp_path: Path, archive: str, render: str) -> list[str]:
+    """The report on every key of an archive's gerrit.config against a render."""
     load()
-    module = sys.modules["site_import_report"]
+    module = sys.modules["site_import_config"]
     imported, rendered = tmp_path / "imported.config", tmp_path / "rendered.config"
     imported.write_text(archive, encoding="utf-8")
     rendered.write_text(render, encoding="utf-8")
-    report: list[str] = module.auth_report(imported, rendered)
+    report: list[str] = module.config_report(imported, rendered)
     return report
 
 
 def test_auth_report_is_empty_for_matching_sections(tmp_path: Path) -> None:
     archive = (
         "[gerrit]\n\tbasePath = git\n[auth]\n\ttype = HTTP\n"
-        '[saml]\n\tuserNameAttr = uid\n[auth "x"]\n\tkey = archive\n'
+        '[saml]\n\tuserNameAttr = uid\n[auth "x"]\n\tname = same\n'
     )
-    # Names compare without regard to case; other sections and
-    # subsections are not compared
+    # Section and key names compare without regard to case; the layout
+    # key gerrit.basePath is not compared
     render = (
         "[AUTH]\n\tTYPE = HTTP\n[saml]\n\tusernameattr = uid\n"
-        '[gerrit]\n\tbasePath = /var/gerrit/git\n[auth "y"]\n\tkey = render\n'
+        '[gerrit]\n\tbasePath = /var/gerrit/git\n[Auth "x"]\n\tNAME = same\n'
     )
-    assert auth_report(tmp_path, archive, render) == []
+    assert config_report(tmp_path, archive, render) == []
 
 
 def test_auth_report_names_each_difference(tmp_path: Path) -> None:
@@ -1276,7 +1276,7 @@ def test_auth_report_names_each_difference(tmp_path: Path) -> None:
         "[auth]\n\ttype = HTTP\n\tlogoutUrl = /logout\n"
         "[saml]\n\tmemberOfAttr = memberOf\n\tuserNameAttr = UserName\n"
     )
-    assert auth_report(tmp_path, archive, render) == [
+    assert config_report(tmp_path, archive, render) == [
         'gerrit.config sets auth.loginurl to "/login" in the archive and not '
         "in the chart's render",
         'gerrit.config sets auth.logouturl to "/logout" in the chart\'s render '
@@ -1288,8 +1288,8 @@ def test_auth_report_names_each_difference(tmp_path: Path) -> None:
 
 def test_auth_report_compares_a_repeated_key_as_a_list(tmp_path: Path) -> None:
     archive = "[auth]\n\ttrustedOpenID = a\n\ttrustedOpenID = b\n"
-    assert auth_report(tmp_path, archive, archive) == []
-    assert auth_report(tmp_path, archive, "[auth]\n\ttrustedOpenID = a\n") == [
+    assert config_report(tmp_path, archive, archive) == []
+    assert config_report(tmp_path, archive, "[auth]\n\ttrustedOpenID = a\n") == [
         'gerrit.config sets auth.trustedopenid to ["a", "b"] in the archive '
         'and "a" in the chart\'s render'
     ]
@@ -1297,11 +1297,11 @@ def test_auth_report_compares_a_repeated_key_as_a_list(tmp_path: Path) -> None:
 
 def test_auth_report_reads_a_value_that_is_not_utf8(tmp_path: Path) -> None:
     load()
-    module = sys.modules["site_import_report"]
+    module = sys.modules["site_import_config"]
     imported, rendered = tmp_path / "imported.config", tmp_path / "rendered.config"
     imported.write_bytes(b"[saml]\n\tuserNameAttr = \xe9\n")
     rendered.write_text("[saml]\n\tuserNameAttr = uid\n")
-    assert module.auth_report(imported, rendered) == [
+    assert module.config_report(imported, rendered) == [
         'gerrit.config sets saml.usernameattr to "\ufffd" in the archive and '
         '"uid" in the chart\'s render'
     ]
@@ -1314,7 +1314,7 @@ def test_auth_report_never_prints_a_secret(tmp_path: Path) -> None:
         "[auth]\n\tregisterEmailPrivateKey = archive-key\n\tcookieSecret = c\n"
     )
     render = "[auth]\n\tregisterEmailPrivateKey = render-key\n\tcookieSecret = c\n"
-    report = auth_report(tmp_path, archive, render)
+    report = config_report(tmp_path, archive, render)
     assert [line.split(" ")[2] for line in report] == [
         "auth.registeremailprivatekey",
         "saml.keystorepassword",
@@ -1346,7 +1346,7 @@ def test_auth_report_compares_the_metadata_path_between_urls(
         "[saml]\n\tkeystorePath = etc/samlKeystore.jks\n"
         f"\tmetadataPath = {render_path}\n"
     )
-    report = auth_report(tmp_path, archive, render)
+    report = config_report(tmp_path, archive, render)
     assert len(report) == int(reported)
     assert all("saml.metadatapath" in line for line in report)
 
@@ -1535,7 +1535,7 @@ def test_auth_report_hides_credentials_in_a_url(
     # Quoted, as git config reads an unquoted '#' as a comment
     archive = f'[{section}]\n\t{key} = "{archive_url}"\n'
     render = f'[{section}]\n\t{key} = "{render_url}"\n'
-    report = auth_report(tmp_path, archive, render)
+    report = config_report(tmp_path, archive, render)
     assert len(report) == 1
     assert shown in report[0]
     for secret in ("source-secret", "render-secret", "c291cmNlLXNlY3JldA"):
@@ -1551,7 +1551,7 @@ def test_auth_report_names_a_saml_section_on_one_side(
     archive, render = (plain, saml) if side == "render" else (saml, plain)
     where = "the chart's render" if side == "render" else "the archive"
     other = "the archive" if side == "render" else "the chart's render"
-    assert auth_report(tmp_path, archive, render) == [
+    assert config_report(tmp_path, archive, render) == [
         f'gerrit.config sets saml.usernameattr to "uid" in {where} and not in {other}'
     ]
 
@@ -1562,20 +1562,9 @@ def test_auth_report_formats_a_long_value_in_linear_time(
 ) -> None:
     # A matcher that rescans each suffix took about 20 seconds here
     began = time.perf_counter()
-    report = auth_report(tmp_path, f"[auth]\n\tloginUrl = {value}\n", "")
+    report = config_report(tmp_path, f"[auth]\n\tloginUrl = {value}\n", "")
     assert time.perf_counter() - began < 2
     assert len(report) == 1
-
-
-def config_report(tmp_path: Path, archive: str, render: str) -> list[str]:
-    """The report on every key of an archive's gerrit.config against a render."""
-    load()
-    module = sys.modules["site_import_report"]
-    imported, rendered = tmp_path / "imported.config", tmp_path / "rendered.config"
-    imported.write_text(archive, encoding="utf-8")
-    rendered.write_text(render, encoding="utf-8")
-    report: list[str] = module.config_report(imported, rendered)
-    return report
 
 
 # Keys the chart sets from the container's layout, as git names them
@@ -1597,7 +1586,6 @@ RENDER_ONLY_SUMMARY = (
 )
 
 
-@pytest.mark.xfail(strict=True, reason="config_report is not implemented")
 def test_config_report_names_a_key_the_import_loses(tmp_path: Path) -> None:
     archive = "[receive]\n\tenableSignedPush = true\n\ttimeout = 4min\n"
     render = "[receive]\n\ttimeout = 4min\n"
@@ -1607,7 +1595,6 @@ def test_config_report_names_a_key_the_import_loses(tmp_path: Path) -> None:
     ]
 
 
-@pytest.mark.xfail(strict=True, reason="config_report is not implemented")
 def test_config_report_names_a_subsection_key(tmp_path: Path) -> None:
     archive = '[commentlink "x"]\n\tmatch = ([A-Z]+-[0-9]+)\n\tlink = /a/$1\n'
     render = '[commentlink "x"]\n\tmatch = ([A-Z]+-[0-9]+)\n\tlink = /b/$1\n'
@@ -1617,7 +1604,6 @@ def test_config_report_names_a_subsection_key(tmp_path: Path) -> None:
     ]
 
 
-@pytest.mark.xfail(strict=True, reason="config_report is not implemented")
 def test_config_report_keeps_the_case_of_a_subsection(tmp_path: Path) -> None:
     archive = '[plugin "X"]\n\tenabled = true\n'
     render = '[plugin "x"]\n\tenabled = true\n'
@@ -1628,7 +1614,6 @@ def test_config_report_keeps_the_case_of_a_subsection(tmp_path: Path) -> None:
     ]
 
 
-@pytest.mark.xfail(strict=True, reason="config_report is not implemented")
 @pytest.mark.parametrize(("section", "key"), LAYOUT_KEYS)
 def test_config_report_skips_the_layout_keys(
     tmp_path: Path, section: str, key: str
@@ -1639,7 +1624,6 @@ def test_config_report_skips_the_layout_keys(
     assert config_report(tmp_path, archive, "") == []
 
 
-@pytest.mark.xfail(strict=True, reason="config_report is not implemented")
 def test_config_report_never_prints_a_secret_in_any_section(
     tmp_path: Path,
 ) -> None:
@@ -1659,7 +1643,6 @@ def test_config_report_never_prints_a_secret_in_any_section(
         assert value not in "\n".join(report)
 
 
-@pytest.mark.xfail(strict=True, reason="config_report is not implemented")
 def test_config_report_sums_up_the_keys_only_the_render_sets(
     tmp_path: Path,
 ) -> None:
@@ -1679,7 +1662,6 @@ def test_config_report_sums_up_the_keys_only_the_render_sets(
         assert value not in "\n".join(report)
 
 
-@pytest.mark.xfail(strict=True, reason="config_report is not implemented")
 def test_config_report_hides_credentials_in_a_subsection(tmp_path: Path) -> None:
     # Built from parts, so the source holds no URL with inline credentials
     source = "user:source-secret" + "@example.invalid"
@@ -1708,7 +1690,6 @@ def test_config_report_hides_credentials_in_a_subsection(tmp_path: Path) -> None
         assert value not in "\n".join(report)
 
 
-@pytest.mark.xfail(strict=True, reason="config_report is not implemented")
 def test_config_report_keeps_a_carriage_return_in_a_subsection(
     tmp_path: Path,
 ) -> None:
@@ -1723,7 +1704,6 @@ def test_config_report_keeps_a_carriage_return_in_a_subsection(
     assert "cr-token" not in "\n".join(report)
 
 
-@pytest.mark.xfail(strict=True, reason="config_report is not implemented")
 @pytest.mark.parametrize(
     ("control", "escaped"),
     [("\x1b", "\\u001b"), ("\x7f", "\\u007f"), ("\x9b", "\\u009b")],
@@ -1740,7 +1720,6 @@ def test_config_report_escapes_controls_in_a_name_and_value(
     ]
 
 
-@pytest.mark.xfail(strict=True, reason="config_report is not implemented")
 @pytest.mark.parametrize(
     "golden",
     sorted((ROOT / "tests" / "chart" / "golden").glob("*/gerrit.config")),
@@ -2058,7 +2037,6 @@ def test_import_with_auth_differences_completes_and_reports_them(
 
 
 @needs_tools
-@pytest.mark.xfail(strict=True, reason="config_report is not implemented")
 def test_import_reports_every_section_without_its_secrets(
     pod: dict[str, Any],
     source: Path,

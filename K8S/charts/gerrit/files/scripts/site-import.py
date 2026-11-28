@@ -24,9 +24,9 @@ values are never logged.
 ``site_import_common.py`` holds the settings and helpers,
 ``site_import_archive.py`` the fetch, checks and migration report,
 ``site_import_report.py`` the report on the imported configuration,
-``site_import_s3.py`` the s3 source's fetch with rclone, and
-``site_import_unpack.py`` the unpacking and its link checks; the chart
-ships all six in its scripts ConfigMap.
+``site_import_config.py`` its gerrit.config comparison, ``site_import_s3.py``
+the s3 source's fetch with rclone, and ``site_import_unpack.py`` the
+unpacking and its link checks; the chart ships all seven in its ConfigMap.
 
 Configuration comes from the environment the chart sets:
 
