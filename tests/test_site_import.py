@@ -1567,6 +1567,193 @@ def test_auth_report_formats_a_long_value_in_linear_time(
     assert len(report) == 1
 
 
+def config_report(tmp_path: Path, archive: str, render: str) -> list[str]:
+    """The report on every key of an archive's gerrit.config against a render."""
+    load()
+    module = sys.modules["site_import_report"]
+    imported, rendered = tmp_path / "imported.config", tmp_path / "rendered.config"
+    imported.write_text(archive, encoding="utf-8")
+    rendered.write_text(render, encoding="utf-8")
+    report: list[str] = module.config_report(imported, rendered)
+    return report
+
+
+# Keys the chart sets from the container's layout, as git names them
+LAYOUT_KEYS = [
+    ("gerrit", "basePath"),
+    ("gerrit", "serverId"),
+    ("httpd", "listenUrl"),
+    ("sshd", "listenAddress"),
+    ("container", "javaHome"),
+    ('container "x"', "user"),
+    ("cache", "directory"),
+    ("index", "type"),
+    ("saml", "keystorePath"),
+    ("saml", "metadataPath"),
+]
+RENDER_ONLY_SUMMARY = (
+    "gerrit.config sets these keys in the chart's render and not in the "
+    "archive, from the chart's values and defaults:"
+)
+
+
+@pytest.mark.xfail(strict=True, reason="config_report is not implemented")
+def test_config_report_names_a_key_the_import_loses(tmp_path: Path) -> None:
+    archive = "[receive]\n\tenableSignedPush = true\n\ttimeout = 4min\n"
+    render = "[receive]\n\ttimeout = 4min\n"
+    assert config_report(tmp_path, archive, render) == [
+        'gerrit.config sets receive.enablesignedpush to "true" in the archive '
+        "and not in the chart's render"
+    ]
+
+
+@pytest.mark.xfail(strict=True, reason="config_report is not implemented")
+def test_config_report_names_a_subsection_key(tmp_path: Path) -> None:
+    archive = '[commentlink "x"]\n\tmatch = ([A-Z]+-[0-9]+)\n\tlink = /a/$1\n'
+    render = '[commentlink "x"]\n\tmatch = ([A-Z]+-[0-9]+)\n\tlink = /b/$1\n'
+    assert config_report(tmp_path, archive, render) == [
+        'gerrit.config sets commentlink.x.link to "/a/$1" in the archive and '
+        '"/b/$1" in the chart\'s render'
+    ]
+
+
+@pytest.mark.xfail(strict=True, reason="config_report is not implemented")
+def test_config_report_keeps_the_case_of_a_subsection(tmp_path: Path) -> None:
+    archive = '[plugin "X"]\n\tenabled = true\n'
+    render = '[plugin "x"]\n\tenabled = true\n'
+    assert config_report(tmp_path, archive, render) == [
+        'gerrit.config sets plugin.X.enabled to "true" in the archive and not '
+        "in the chart's render",
+        f"{RENDER_ONLY_SUMMARY} plugin.x.enabled",
+    ]
+
+
+@pytest.mark.xfail(strict=True, reason="config_report is not implemented")
+@pytest.mark.parametrize(("section", "key"), LAYOUT_KEYS)
+def test_config_report_skips_the_layout_keys(
+    tmp_path: Path, section: str, key: str
+) -> None:
+    archive = f"[{section}]\n\t{key} = /srv/gerrit/a\n"
+    render = f"[{section}]\n\t{key} = /var/gerrit/b\n"
+    assert config_report(tmp_path, archive, render) == []
+    assert config_report(tmp_path, archive, "") == []
+
+
+@pytest.mark.xfail(strict=True, reason="config_report is not implemented")
+def test_config_report_never_prints_a_secret_in_any_section(
+    tmp_path: Path,
+) -> None:
+    archive = (
+        "[sendemail]\n\tsmtpPass = smtp-value\n"
+        "[receive]\n\tcertNonceSeed = seed-value\n"
+        '[plugin "x"]\n\ttoken = token-value\n\tapiKEY = key-value\n'
+    )
+    report = config_report(tmp_path, archive, "")
+    assert [line.split(" ")[2] for line in report] == [
+        "plugin.x.apikey",
+        "plugin.x.token",
+        "receive.certnonceseed",
+        "sendemail.smtppass",
+    ]
+    for value in ("smtp-value", "seed-value", "token-value", "key-value"):
+        assert value not in "\n".join(report)
+
+
+@pytest.mark.xfail(strict=True, reason="config_report is not implemented")
+def test_config_report_sums_up_the_keys_only_the_render_sets(
+    tmp_path: Path,
+) -> None:
+    archive = "[receive]\n\tenableSignedPush = true\n"
+    render = (
+        "[change]\n\tupdateDelay = 5min\n"
+        '[plugin "x"]\n\ttoken = render-token\n'
+        "[receive]\n\ttimeout = 4min\n"
+    )
+    report = config_report(tmp_path, archive, render)
+    assert report == [
+        'gerrit.config sets receive.enablesignedpush to "true" in the archive '
+        "and not in the chart's render",
+        f"{RENDER_ONLY_SUMMARY} change.updatedelay, plugin.x.token, receive.timeout",
+    ]
+    for value in ("5min", "render-token", "4min"):
+        assert value not in "\n".join(report)
+
+
+@pytest.mark.xfail(strict=True, reason="config_report is not implemented")
+def test_config_report_hides_credentials_in_a_subsection(tmp_path: Path) -> None:
+    # Built from parts, so the source holds no URL with inline credentials
+    source = "user:source-secret" + "@example.invalid"
+    archive = (
+        f'[credential "https://{source}"]\n\ttoken = source-token\n'
+        f'[http "https://{source}"]\n\tsslVerify = true\n'
+        f'[url "{source}"]\n\tinsteadOf = a\n'
+    )
+    render = (
+        '[http "https://user:render-secret'
+        + '@example.invalid"]\n\tsslVerify = false\n'
+    )
+    report = config_report(tmp_path, archive, render)
+    hidden = "https://(not shown)@example.invalid"
+    assert report == [
+        f"gerrit.config sets credential.{hidden}.token in the archive and not "
+        "in the chart's render; the value is not shown, as the key's name "
+        "marks a secret",
+        f'gerrit.config sets http.{hidden}.sslverify to "true" in the archive '
+        "and not in the chart's render",
+        'gerrit.config sets url.(not shown).insteadof to "a" in the archive '
+        "and not in the chart's render",
+        f"{RENDER_ONLY_SUMMARY} http.{hidden}.sslverify",
+    ]
+    for value in ("source-secret", "source-token", "render-secret"):
+        assert value not in "\n".join(report)
+
+
+@pytest.mark.xfail(strict=True, reason="config_report is not implemented")
+def test_config_report_keeps_a_carriage_return_in_a_subsection(
+    tmp_path: Path,
+) -> None:
+    # Read as text, the CR became a newline, which ends the name early:
+    # the token would show as the value of a key named plugin.x
+    report = config_report(tmp_path, '[plugin "x\r"]\n\ttoken = cr-token\n', "")
+    assert report == [
+        "gerrit.config sets plugin.x\\r.token in the archive and not in the "
+        "chart's render; the value is not shown, as the key's name marks a "
+        "secret"
+    ]
+    assert "cr-token" not in "\n".join(report)
+
+
+@pytest.mark.xfail(strict=True, reason="config_report is not implemented")
+@pytest.mark.parametrize(
+    ("control", "escaped"),
+    [("\x1b", "\\u001b"), ("\x7f", "\\u007f"), ("\x9b", "\\u009b")],
+)
+def test_config_report_escapes_controls_in_a_name_and_value(
+    tmp_path: Path, control: str, escaped: str
+) -> None:
+    archive = f'[commentlink "a{control}[2K"]\n\tlink = b{control}[1G\n'
+    render = f'[commentlink "c{control}[2K"]\n\tlink = d\n'
+    assert config_report(tmp_path, archive, render) == [
+        f'gerrit.config sets commentlink.a{escaped}[2K.link to "b{escaped}[1G" '
+        "in the archive and not in the chart's render",
+        f"{RENDER_ONLY_SUMMARY} commentlink.c{escaped}[2K.link",
+    ]
+
+
+@pytest.mark.xfail(strict=True, reason="config_report is not implemented")
+@pytest.mark.parametrize(
+    "golden",
+    sorted((ROOT / "tests" / "chart" / "golden").glob("*/gerrit.config")),
+    ids=lambda p: p.parent.name,
+)
+def test_config_report_is_empty_for_a_golden_render(
+    tmp_path: Path, golden: Path
+) -> None:
+    text = golden.read_text(encoding="utf-8")
+    assert "[" in text
+    assert config_report(tmp_path, text, text) == []
+
+
 @pytest.mark.parametrize(
     ("text", "files", "expected"),
     [
@@ -1868,6 +2055,58 @@ def test_import_with_auth_differences_completes_and_reports_them(
     assert logged.out.count(member_of) == 1
     assert "source keystore password" not in logged.out + logged.err
     assert "source keystore password" not in json.dumps(recorded)
+
+
+@needs_tools
+@pytest.mark.xfail(strict=True, reason="config_report is not implemented")
+def test_import_reports_every_section_without_its_secrets(
+    pod: dict[str, Any],
+    source: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    secrets = (
+        "source smtp pass",
+        "source nonce seed",
+        "source plugin token",
+        "source-url-secret",
+    )
+    with (source / "etc" / "gerrit.config").open("a") as config:
+        config.write(
+            "[receive]\n\tenableSignedPush = true\n"
+            f'\tcertNonceSeed = "{secrets[1]}"\n'
+            f'[sendemail]\n\tsmtpPass = "{secrets[0]}"\n'
+            f'[plugin "x"]\n\ttoken = "{secrets[2]}"\n'
+            # Built from parts, so the source holds no URL with inline
+            # credentials
+            f'[http "https://user:{secrets[3]}'
+            + '@example.invalid"]\n\tsslVerify = true\n'
+        )
+    export = export_site(source, tmp_path / "export")
+    site: Path = pod["site"]
+    _, code = run_main(import_env(pod, export), monkeypatch)
+    logged = capsys.readouterr()
+    assert code == 0, logged.err
+    recorded = state(site)
+    assert recorded["state"] == "complete"
+    warnings = recorded["warnings"]
+    signed_push = (
+        'gerrit.config sets receive.enablesignedpush to "true" in the archive '
+        "and not in the chart's render"
+    )
+    assert signed_push in warnings
+    assert logged.out.count(signed_push) == 1
+    for name in (
+        "receive.certnonceseed",
+        "sendemail.smtppass",
+        "plugin.x.token",
+        "http.https://(not shown)@example.invalid.sslverify",
+    ):
+        assert any(w.startswith(f"gerrit.config sets {name} ") for w in warnings)
+    for secret in secrets:
+        assert secret not in logged.out + logged.err
+        assert secret not in json.dumps(recorded)
 
 
 def test_gerrit_version_reads_the_release_war(tmp_path: Path) -> None:
